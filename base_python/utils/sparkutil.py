@@ -4,6 +4,15 @@
 # @Author  : tianyafu
 
 
+"""
+安装pyspark时  采用 pip3 install pyspark-2.4.6.tar.gz的方式安装  pyspark-2.4.6.tar.gz由本地上传即可
+环境变量中最好配置上 尤其是PYSPARK_PYTHON
+# SPARK ENV
+export SPARK_HOME=/application/spark
+export PATH=${SPARK_HOME}/bin:${PATH}
+export PYSPARK_PYTHON=python3
+"""
+
 from pyspark.sql import SparkSession
 from pyspark import SparkConf
 
