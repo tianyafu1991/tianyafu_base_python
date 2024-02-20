@@ -26,7 +26,7 @@ from TableSheet import TableSheet
 
 def get_tables_from_gp_meta_data(logger, conn):
     """
-    通过 sql 从Hive的元数据库MySQL中查询出某个db_name下的所有表以及表的column信息
+    通过 sql 从GP中查询出某个db_name 下的所有表以及表的column信息
     :param logger: 日志
     :param db_name: Hive的database name
     :param conn: Hive元数据库的连接
@@ -95,8 +95,9 @@ when a.tbl_name like 'dwd%%' then 2
 when a.tbl_name like 'dim%%' then 3
 when a.tbl_name like 'dws%%' then 4
 when a.tbl_name like 'dm%%' then 5
-when a.tbl_name like 'tmp%%' then 6
-else 7
+when a.tbl_name like 'app%%' then 6
+when a.tbl_name like 'tmp%%' then 7
+else 8
 end
 ) table_order
 from
@@ -136,7 +137,6 @@ def get_black_list_dict():
     black_list_dict = dict()
 
     black_list_dict['xxx'] = 'xxx'
-
 
     return black_list_dict
 
@@ -201,7 +201,7 @@ def parse_catalog_sheet(logger, workbook, sheet_name=catalog_sheet_name):
             model.incremental_flg = i[15]
             # 备注
             model.remark = i[16]
-            # 超链接对应的sheet
+            # 超链接对应的sheet 在模型名称(表名)这一列用超链接 链接到了该表具体的sheet中
             hyperlink = catalog_sheet.cell(row_index, 5).hyperlink
             hyperlink_sheet_name = ''
             if hyperlink is not None:
@@ -239,6 +239,8 @@ def get_table_level(table_name):
         level = 'dws'
     elif table_name.startswith('dm'):
         level = 'dm'
+    elif table_name.startswith('app'):
+        level = 'app'
     elif table_name.startswith('tmp'):
         level = 'tmp'
     else:
@@ -269,21 +271,45 @@ def set_border(logger, ws, min_row, max_row, min_col, max_col, style):
             cell.border = border_set
 
 
+def get_gp_tbl_list_dict():
+    """
+    获取gp中可能需要添加的表 有些表不再Hive中 可能是直接采集到GP中的 这些表需要添加进去
+    :return:
+    """
+    gp_tbl_list_dict = dict()
+
+    gp_tbl_list_dict['xxx'] = 'xxx'
+
+    return gp_tbl_list_dict
+
+
 def get_missing_meta_data(logger, mysql_dict, catalog_dict, gp_dict):
     """
     获取在mysql_dict中有 但是excel中缺失的元数据信息
     :param logger: 日志
     :param mysql_dict: Hive元数据库中的元数据信息
     :param catalog_dict: excel目录中的元数据信息
-    :return: 在mysql_dict 但是excel中缺失的元数据信息
+    :param gp_dict: GP数据库中的元数据信息
+    :return: 在mysql_dict 但是excel中缺失的元数据信息 和 在gp_dict 但是excel中缺失的元数据信息
     """
+    # 获取黑名单 因部分Hive表仅仅是开发过程中的备份表 或者是 临时表 无需记录元数据 所以需要黑名单过滤
     black_dict = get_black_list_dict()
+    # 获取gp中可能需要添加的表 有些表不再Hive中 可能是直接采集到GP中的 这些表需要添加进去
+    gp_tbl_dict = get_gp_tbl_list_dict()
     missing_dict = dict()
+    # 目录中原来没有数据
     if len(catalog_dict) == 0:
         for table_name in mysql_dict.keys():
             black_info = black_dict.get(table_name, None)
             if black_info is None:
+                # 因为目录中原来没有数据 则只要该表不在黑名单中 就是本次需要维护到数据字典中的表
                 missing_dict[table_name] = mysql_dict[table_name]
+        for tbl_name in gp_dict.keys():
+            gp_tbl_info = gp_tbl_dict.get(tbl_name, None)
+            is_add_by_hive = missing_dict.get(tbl_name, None)
+            # 是GP中要加入的表 且 在Hive中是不存在的
+            if gp_tbl_info is not None and is_add_by_hive is None:
+                missing_dict[tbl_name] = gp_dict[tbl_name]
     else:
         for table_name in mysql_dict.keys():
             table_info = catalog_dict.get(table_name, None)
@@ -291,25 +317,35 @@ def get_missing_meta_data(logger, mysql_dict, catalog_dict, gp_dict):
             # excel目录中没有 并且也不是黑名单
             if table_info is None and black_info is None:
                 missing_dict[table_name] = mysql_dict[table_name]
+        for tbl_name in gp_dict.keys():
+            table_info = catalog_dict.get(tbl_name, None)
+            is_add_by_hive = missing_dict.get(tbl_name, None)
+            gp_tbl_info = gp_tbl_dict.get(tbl_name, None)
+            # excel目录中没有 且不在Hive中 即只在GP中且需要添加的
+            if table_info is None and is_add_by_hive is None and gp_tbl_info is not None:
+                missing_dict[tbl_name] = gp_dict[tbl_name]
     logger.info("获取缺失的元数据信息完成.......")
     return missing_dict
 
 
-def write_catalog_meta_data(logger, level, table_name, table_comment, catalog_sheet, table_no, current_row):
+def write_catalog_meta_data(logger, level, table_name, table_comment, catalog_sheet, table_no, current_row, table_type):
     """
     写出表的元数据到excel的目录
+    :param logger: 日志记录
     :param level: 表层级
     :param table_name: 表名
     :param table_comment: 表注释
     :param catalog_sheet: 目录sheet 的 worksheet实例
     :param table_no: 表的编号 也是表的元数据sheet的sheet name
+    :param current_row:
+    :param table_type: 表类别
     :return: 该表在目录中的行号
     """
     if current_row is None:
         current_row = catalog_sheet.max_row + 1
     else:
         catalog_sheet.insert_rows(current_row)
-    # 序号
+    # 编号
     catalog_sheet.cell(current_row, 1).value = table_no
     # 层级
     catalog_sheet.cell(current_row, 2).value = level
@@ -326,24 +362,37 @@ def write_table_sheet_meta_data(logger, table_name, table_comment, table_sheet, 
                                 border_style):
     """
     写出表的元数据到excel的对应sheet中
-    :param table_name: 表名
-    :param table_comment: 表注释
-    :param table_sheet: 表的sheet的worksheet实例
-    :param table_meta_list: 表的字段的元数据信息的list
-    :param meta_row: 表在excel目录中的行号
-    :retrun:
+    Parameters
+    ----------
+    logger : 日志
+    table_name : 表名
+    table_comment : 表注释
+    table_sheet : 表的sheet的worksheet实例
+    table_meta_list : 表的字段的元数据信息的list
+    meta_row : 表在excel目录中的行号
+    border_style : excel边框样式
+
+    Returns
+    -------
+
     """
+    # 第一行的第二列 即B1 填充表名
     table_sheet.cell(1, 2).value = table_name
+    # 第二行的第二列 即B2 填充表注释
     table_sheet.cell(2, 2).value = table_comment
-    # 第1行第8列为返回
+    # 第1行第8列为返回 即H1
     table_sheet.cell(1, 8).value = '=HYPERLINK("#\'{}\'!E{}", "{}")'.format(catalog_sheet_name, str(meta_row), "返回")
     table_sheet.cell(1, 8).style = "Hyperlink"
     # 设置返回这一格的样式
     set_border(logger, table_sheet, 1, 1, 8, 8, border_style)
+    # 开始写入字段信息
     for i in range(0, len(table_meta_list)):
         # 字段是从第4行开始写的
+        # 字段名
         table_sheet.cell(4 + i, 1).value = table_meta_list[i].column_name
+        # 数据类型
         table_sheet.cell(4 + i, 2).value = table_meta_list[i].column_type_name
+        # 字段说明
         table_sheet.cell(4 + i, 3).value = table_meta_list[i].column_comment
 
 
@@ -380,42 +429,149 @@ def write_meta_data_for_init(logger, missing_dict, workbook, style,
         logger.info('表%s元数据写出完成' % table_name)
 
 
+def write_missing_meta_data(catalog_sheet, gp_dict, logger, missing_dict, style, template_sheet, workbook,
+                            max_row_no_dict):
+    """
+    将缺失的数据写入到excel的目录中 并将表字段等元数据信息写入到表的sheet中
+    Parameters
+    ----------
+    catalog_sheet : excel模板目录sheet
+    gp_dict : gp表的元数据的字典
+    logger : 日志记录
+    missing_dict : 要写入的数据的字典
+    style : excel边框样式
+    template_sheet : excel模板中table模板
+    workbook : excel的workbook
+    max_row_no_dict : 各个层级的最大的行
+
+    Returns
+    -------
+
+    """
+    if len(missing_dict) > 0:
+        for table_name in missing_dict.keys():
+            table_meta_list = missing_dict[table_name]
+            # 表注释
+            table_comment = table_meta_list[0].tbl_comment
+            # 获取表层级
+            level = get_table_level(table_name)
+            # 生成表的唯一编号
+            table_no = level + '_' + str(uuid.uuid4()).split('-')[0]
+            # 为该表增加一个sheet
+            table_sheet = workbook.copy_worksheet(template_sheet)
+            # 该sheet的名称
+            table_sheet.title = table_no
+            # 表类别
+            table_type = "GP" if gp_dict.get(table_name) is not None else "Hive"
+            max_row = max_row_no_dict.get(level)
+            # 写目录元数据信息
+            meta_row = write_catalog_meta_data(logger, level, table_name, table_comment, catalog_sheet, table_no,
+                                               max_row,
+                                               table_type)
+            # 写table sheet元数据信息
+            write_table_sheet_meta_data(logger, table_name, table_comment, table_sheet, table_meta_list, meta_row,
+                                        style)
+            # min_row=1 第一行 max_row=3 + len(table_meta_list) 字段信息从第4行开始  所以是3+len()  min_col=1 第1列 max_col=7  第G列 为细边框
+            set_border(logger, table_sheet, 1, 3 + len(table_meta_list), 1, 7, style)
+            logger.info('表%s元数据写出完成' % table_name)
+
+
+def write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, missing_dict, style, template_sheet,
+                                            workbook):
+    """
+
+    Parameters
+    ----------
+    catalog_sheet : excel模板目录sheet
+    gp_dict : gp表的元数据的字典
+    logger : 日志记录
+    missing_dict : 要写入的数据的字典
+    style : excel边框样式
+    template_sheet : excel模板中table模板
+    workbook : excel的workbook
+
+    Returns
+    -------
+
+    """
+    # 获取excel的目录的内容
+    excel_catalog_dict = parse_catalog_sheet(logger, workbook)
+    # 获取catalog_dict中各个表层级的最大行
+    max_row_no_dict = get_level_max_row_no(excel_catalog_dict)
+    # 将缺失的数据写入到excel的目录中 并将表字段等元数据信息写入到表的sheet中
+    write_missing_meta_data(catalog_sheet, gp_dict, logger, missing_dict, style, template_sheet, workbook,
+                            max_row_no_dict)
+
+
 def write_meta_data_for_maintain(logger, missing_dict, workbook, style, max_row_no_dict, gp_dict,
                                  catalog_sheet_name=catalog_sheet_name, template_sheet_name=template_sheet_name):
     """
     用于维护excel数据字典时用该方法 因为excel的目录中已有数据 如果要写入新的元数据信息  需要将待插入的表的level与相同的level的数据放在一起
     写出缺失的元数据信息到excel
-    :param logger: 日志
-    :param missing_dict: 缺失的元数据的字典
-    :param workbook: excel的workbook
-    :param output_path: 输出的excel文件路径
-    :param catalog_sheet_name: excel模板目录sheet的sheet name
-    :param template_sheet_name: excel模板中table模板sheet的sheet name
-    :param style: 边框样式 默认细边框
-    :return:
+    Parameters
+    ----------
+    logger : 日志
+    missing_dict : 缺失的元数据的字典
+    workbook : excel的workbook
+    style : 边框样式 默认细边框
+    max_row_no_dict : 各个层级的最大的行
+    gp_dict : gp表的元数据的字典
+    catalog_sheet_name : excel模板目录sheet的sheet name
+    template_sheet_name : excel模板中table模板sheet的sheet name
+
+    Returns
+    -------
+
     """
     catalog_sheet = workbook[catalog_sheet_name]
     template_sheet = workbook[template_sheet_name]
-    for table_name in missing_dict.keys():
-        table_meta_list = missing_dict[table_name]
-        table_comment = table_meta_list[0].tbl_comment
-        level = get_table_level(table_name)
-        # 生成表的唯一编号
-        table_no = level + '_' + str(uuid.uuid4()).split('-')[0]
-        table_sheet = workbook.copy_worksheet(template_sheet)
-        table_sheet.title = table_no
-        # 写目录元数据信息
-        max_row = max_row_no_dict.get(level)
-        # 这里的插入一行 使用的是insert_rows(idx) 是在idx之前插入一行
-        meta_row = write_catalog_meta_data(logger, level, table_name, table_comment, catalog_sheet, table_no,
-                                           max_row)
-        write_table_sheet_meta_data(logger, table_name, table_comment, table_sheet, table_meta_list, meta_row, style)
-        # min_row=1 第一行 max_row=3 + len(table_meta_list) 字段信息从第4行开始  所以是3+len()  min_col=1 第1列 max_col=7  第G列 为细边框
-        set_border(logger, table_sheet, 1, 3 + len(table_meta_list), 1, 7, style)
-        # 因为 向目录中插入了一行 所以各个层级的最大行号都要 加 1
-        for level in max_row_no_dict.keys():
-            max_row_no_dict[level] = max_row_no_dict[level] + 1
-        logger.info('表%s元数据缺失，现已维护完成' % table_name)
+    ods_missing_dict = dict()
+    dwd_missing_dict = dict()
+    dim_missing_dict = dict()
+    dws_missing_dict = dict()
+    dm_missing_dict = dict()
+    app_missing_dict = dict()
+    tmp_missing_dict = dict()
+    for tbl_name in missing_dict.keys():
+        level = get_table_level(tbl_name)
+        # level = "tmp"
+        if level == 'ods':
+            ods_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        elif level == 'dwd':
+            dwd_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        elif level == 'dim':
+            dim_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        elif level == 'dws':
+            dws_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        elif level == 'dm':
+            dm_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        elif level == 'tmp':
+            tmp_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        elif level == 'app':
+            app_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+        else:
+            tmp_missing_dict[tbl_name] = missing_dict.get(tbl_name)
+    # 写入缺失的ods表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, ods_missing_dict, style, template_sheet,
+                                            workbook)
+    # 写入缺失的dwd表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, dwd_missing_dict, style, template_sheet,
+                                            workbook)
+    # 写入缺失的dim表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, dim_missing_dict, style, template_sheet,
+                                            workbook)
+    # 写入缺失的dws表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, dws_missing_dict, style, template_sheet,
+                                            workbook)
+    # 写入缺失的dm表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, dm_missing_dict, style, template_sheet,
+                                            workbook)
+    # 写入缺失的app表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, app_missing_dict, style, template_sheet,
+                                            workbook)
+    # 写入缺失的tmp表
+    write_missing_meta_data_by_missing_dict(catalog_sheet, gp_dict, logger, tmp_missing_dict, style, template_sheet,
+                                            workbook)
 
 
 def get_level_max_row_no(catalog_dict):
@@ -430,9 +586,11 @@ def get_level_max_row_no(catalog_dict):
         level = model.level
         dict_row_no = result_dict.get(level)
         if dict_row_no is None:
+            # result_dict中没有该层级 则将本model的行号放入
             result_dict[level] = row_no
         else:
-            result_dict[level] = dict_row_no if row_no > dict_row_no else row_no
+            # 本model的行号比result_dict中的该level的行号大时 取本model的行号
+            result_dict[level] = row_no if row_no > dict_row_no else dict_row_no
     return result_dict
 
 
@@ -479,14 +637,29 @@ def maintain_meta_data(logger, workbook, mysql_dict, catalog_dict, style, gp_dic
 
 
 def unmerge_catalog_cells(logger, workbook):
+    """
+    将层级的合并单元格拆分掉
+    Parameters
+    ----------
+    logger
+    workbook : 文档对象
+
+    Returns
+    -------
+
+    """
+    # 获取目录的sheet
     catalog_sheet = workbook[catalog_sheet_name]
     # merged_ranges = catalog_sheet.merged_cells.ranges
+    # 这个merged_ranges是一个list
     merged_ranges = catalog_sheet.merged_cell_ranges
     for merged_range in merged_ranges:
+        # merged_range_str例如B2:B31
         merged_range_str = str(merged_range)
         logger.info("有合并单元格%s" % merged_range)
-        if merged_range_str.split(':')[0].startswith("B") and merged_range_str.split(':')[1].startswith("B"):
-            # logger.info("拆分单元格%s" % merged_range_str)
+        # 只有当合并单元格是由2个及以上的单元格合并而来 才需要拆分
+        if len(merged_range_str.split(':')) == 2 and merged_range_str.split(':')[0].startswith("B") and \
+                merged_range_str.split(':')[1].startswith("B"):
             catalog_sheet.unmerge_cells(merged_range_str)
 
 

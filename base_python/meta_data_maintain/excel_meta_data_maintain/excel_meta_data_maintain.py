@@ -102,12 +102,12 @@ if __name__ == '__main__':
         workbook = openpyxl.load_workbook(abspath)
         # 先将层级的合并单元格拆分掉
         excel_meta_data_util.unmerge_catalog_cells(logger, workbook)
-        mysql_conn = mysqlutil.connect_with_port(logger, hive_mysql_host, hive_mysql_user, hive_mysql_passwd,
-                                                 hive_mysql_database,
-                                                 int(hive_mysql_port))
+        hive_mysql_conn = mysqlutil.connect_with_port(logger, hive_mysql_host, hive_mysql_user, hive_mysql_passwd,
+                                                      hive_mysql_database,
+                                                      int(hive_mysql_port))
         gp_conn = gputil.maintain_conn(logger, None, gp_host, gp_user, gp_passwd, gp_database, gp_port)
         # 通过 sql 从Hive的元数据库MySQL中查询出某个db_name下的所有表以及表的column信息
-        mysql_dict = excel_meta_data_util.get_tables_from_hive_meta_data(logger, project_hive_db, mysql_conn)
+        mysql_dict = excel_meta_data_util.get_tables_from_hive_meta_data(logger, project_hive_db, hive_mysql_conn)
         # 通过 sql 从GP中查询出某个db_name 下的所有表以及表的column信息
         gp_dict = excel_meta_data_util.get_tables_from_gp_meta_data(logger, gp_conn)
         # 获取excel的目录的内容
@@ -140,5 +140,5 @@ if __name__ == '__main__':
         logger.error(e)
         raise Exception
     finally:
-        mysqlutil.close(mysql_conn)
+        mysqlutil.close(hive_mysql_conn)
         gputil.close(gp_conn)
