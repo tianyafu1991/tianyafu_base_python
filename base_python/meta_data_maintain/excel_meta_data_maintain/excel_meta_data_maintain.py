@@ -95,9 +95,9 @@ def get_sheet_content(main_book):
 
 if __name__ == '__main__':
     try:
-        excel_input_path = r'../input/xxxx.xlsx'
+        excel_input_path = root_path + '/meta_data_maintain/input/xxxx.xlsx'
         output_file_name = "%s数据字典@%s.xlsx" % (project_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
-        output_path = "../output/%s" % output_file_name
+        output_path = root_path + "/meta_data_maintain/output/%s" % output_file_name
         abspath = os.path.abspath(excel_input_path)
         workbook = openpyxl.load_workbook(abspath)
         hive_mysql_conn = mysqlutil.connect_with_port(logger, hive_mysql_host, hive_mysql_user, hive_mysql_passwd,
