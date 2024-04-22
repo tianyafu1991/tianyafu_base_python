@@ -57,42 +57,6 @@ gp_passwd = config.get(gp_section, "passwd")
 gp_database = config.get(gp_section, "database")
 gp_port = config.get(gp_section, "port")
 
-
-def get_sheet_content(main_book):
-    """
-    获取表名的超链接的sheet_name
-    因部分表名长度较长  用表名做sheet_name时 会提示超出长度  所以表名与超链接的sheet_name 并不是一一对应的 所以这里要先获取hyperlink_sheet_name
-    """
-    table_sheet_dict = dict()
-    catalog_sheet = main_book['目录']
-    # 因range函数为左闭右开 所以这里catalog_sheet.max_row 需要 加 1  而第一行为表头 所以从2开始
-    for i in range(2, catalog_sheet.max_row + 1):
-        table_name = catalog_sheet.cell(i, 5).value
-        hyperlink_sheet_name = catalog_sheet.cell(i, 5).hyperlink.location
-        if '!' in hyperlink_sheet_name:
-            hyperlink_sheet_name = hyperlink_sheet_name.split('!')[0]
-            if '\'' in hyperlink_sheet_name:
-                hyperlink_sheet_name = hyperlink_sheet_name[1:len(hyperlink_sheet_name) - 1]
-        table_sheet_content = main_book[hyperlink_sheet_name]
-        column_list = []
-        max_row = table_sheet_content.max_row
-        # 有可能这个sheet中没有内容 只有表头 这时候需要在这里添加一行 用来将该table的超链接信息传递出去
-        if max_row < 4:
-            column_list.append(('', '', '', hyperlink_sheet_name))
-            table_sheet_dict[table_name] = column_list
-        else:
-            for i in range(4, table_sheet_content.max_row + 1):
-                column_name = table_sheet_content.cell(i, 1).value
-                column_type_name = table_sheet_content.cell(i, 2).value
-                column_comment = table_sheet_content.cell(i, 3).value
-                column_info = (column_name, column_type_name, column_comment, hyperlink_sheet_name)
-                column_list.append(column_info)
-            table_sheet_dict[table_name] = column_list
-    return table_sheet_dict
-
-    # main_book.save("1.xlsx")
-
-
 if __name__ == '__main__':
     try:
         excel_input_path = root_path + '/meta_data_maintain/input/xxxx.xlsx'
