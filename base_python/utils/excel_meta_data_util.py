@@ -71,6 +71,47 @@ SELECT
     return result_dict
 
 
+def get_tables_from_mysql(logger, db_name, conn, need_maintain_table_name_dict):
+    result_dict = dict()
+    get_tables_sql = """
+    SELECT
+b.TABLE_NAME AS tbl_name
+,a.TABLE_COMMENT as  tbl_comment
+,lower(b.COLUMN_NAME) AS column_name
+,b.COLUMN_TYPE AS column_type_name
+,b.COLUMN_COMMENT AS column_comment
+,b.ORDINAL_POSITION AS integer_idx
+,0 as table_order
+FROM
+information_schema.TABLES a
+inner join     
+information_schema.`COLUMNS` b
+on a.table_name = b.table_name
+and a.table_schema = b.table_schema
+WHERE
+b.TABLE_SCHEMA = '%s'
+ORDER BY
+b.TABLE_NAME,
+b.ORDINAL_POSITION
+    """ % db_name
+    result = mysqlutil.select_with_conn(logger, conn, get_tables_sql)
+    for (tbl_name, tbl_comment, column_name, column_type_name, column_comment, integer_idx, table_order) in result:
+        if need_maintain_table_name_dict.get(tbl_name, None):
+            tbl_comment = '' if tbl_comment is None else tbl_comment
+            column_list = result_dict.get(tbl_name, [])
+            table_sheet_instance = TableSheet()
+            table_sheet_instance.table_name = tbl_name
+            table_sheet_instance.tbl_comment = tbl_comment
+            table_sheet_instance.column_name = column_name
+            table_sheet_instance.column_type_name = column_type_name
+            table_sheet_instance.column_comment = column_comment
+            table_sheet_instance.integer_idx = integer_idx
+            column_list.append(table_sheet_instance)
+            result_dict[tbl_name] = column_list
+    logger.info("从元数据库中获取元数据 完成......")
+    return result_dict
+
+
 def get_tables_from_hive_meta_data(logger, db_name, conn):
     """
     通过 sql 从Hive的元数据库MySQL中查询出某个db_name下的所有表以及表的column信息
@@ -283,29 +324,27 @@ def get_gp_tbl_list_dict():
     return gp_tbl_list_dict
 
 
-def get_missing_meta_data(logger, mysql_dict, catalog_dict, gp_dict):
+def get_missing_meta_data(logger, mysql_dict, catalog_dict, gp_dict, gp_white_dict, hive_black_dict):
     """
     获取在mysql_dict中有 但是excel中缺失的元数据信息
     :param logger: 日志
     :param mysql_dict: Hive元数据库中的元数据信息
     :param catalog_dict: excel目录中的元数据信息
     :param gp_dict: GP数据库中的元数据信息
+    :param gp_white_dict: GP数据库中的需要添加的元数据信息 即白名单 因为GP中只有少数表是需要维护元数据到excel中 所以用白名单来标识
+    :param hive_black_dict: Hive中不需要添加的元数据信息 即黑名单 因Hive中只有少数表是不需要维护元数据到excel中 所以用黑名单来标识
     :return: 在mysql_dict 但是excel中缺失的元数据信息 和 在gp_dict 但是excel中缺失的元数据信息
     """
-    # 获取黑名单 因部分Hive表仅仅是开发过程中的备份表 或者是 临时表 无需记录元数据 所以需要黑名单过滤
-    black_dict = get_black_list_dict()
-    # 获取gp中可能需要添加的表 有些表不再Hive中 可能是直接采集到GP中的 这些表需要添加进去
-    gp_tbl_dict = get_gp_tbl_list_dict()
     missing_dict = dict()
     # 目录中原来没有数据
     if len(catalog_dict) == 0:
         for table_name in mysql_dict.keys():
-            black_info = black_dict.get(table_name, None)
+            black_info = hive_black_dict.get(table_name, None)
             if black_info is None:
                 # 因为目录中原来没有数据 则只要该表不在黑名单中 就是本次需要维护到数据字典中的表
                 missing_dict[table_name] = mysql_dict[table_name]
         for tbl_name in gp_dict.keys():
-            gp_tbl_info = gp_tbl_dict.get(tbl_name, None)
+            gp_tbl_info = gp_white_dict.get(tbl_name, None)
             is_add_by_hive = missing_dict.get(tbl_name, None)
             # 是GP中要加入的表 且 在Hive中是不存在的
             if gp_tbl_info is not None and is_add_by_hive is None:
@@ -313,14 +352,14 @@ def get_missing_meta_data(logger, mysql_dict, catalog_dict, gp_dict):
     else:
         for table_name in mysql_dict.keys():
             table_info = catalog_dict.get(table_name, None)
-            black_info = black_dict.get(table_name, None)
+            black_info = hive_black_dict.get(table_name, None)
             # excel目录中没有 并且也不是黑名单
             if table_info is None and black_info is None:
                 missing_dict[table_name] = mysql_dict[table_name]
         for tbl_name in gp_dict.keys():
             table_info = catalog_dict.get(tbl_name, None)
             is_add_by_hive = missing_dict.get(tbl_name, None)
-            gp_tbl_info = gp_tbl_dict.get(tbl_name, None)
+            gp_tbl_info = gp_white_dict.get(tbl_name, None)
             # excel目录中没有 且不在Hive中 即只在GP中且需要添加的
             if table_info is None and is_add_by_hive is None and gp_tbl_info is not None:
                 missing_dict[tbl_name] = gp_dict[tbl_name]

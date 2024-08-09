@@ -5,6 +5,7 @@
 
 
 import os
+import sys
 import time
 import pickle
 import json
@@ -18,6 +19,11 @@ import configparser
 
 file_dir_abs_path = os.path.dirname(os.path.abspath(__file__))
 root_abs_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+
+lib_path = root_abs_path + '/utils'
+sys.path.append(lib_path)
+
+import osutil
 
 azkaban_status_codes = {10: 'Ready',
                         20: 'Preparing',
@@ -109,7 +115,7 @@ def send_dingding(current_time_succeed, running, current_time_no_succeed):
         sub_send3 = '成功{}个，非成功{}个\n'.format(len(current_time_succeed), len(current_time_no_succeed))
     else:
         sub_send3 = '成功{}个，执行中{}个，非成功{}个\n'.format(len(current_time_succeed), len(running),
-                                                   len(current_time_no_succeed))
+                                                              len(current_time_no_succeed))
     if len(current_time_no_succeed) > 0:
         sub_send3 += '非成功作业名：\n' + '\n'.join([i['flow_id'] for i in current_time_no_succeed]) + '\n请及时处理~'
 
@@ -148,7 +154,9 @@ def send_dingding(current_time_succeed, running, current_time_no_succeed):
 
 
 def main():
-    fa = open(os.path.join(file_dir_abs_path, 'log/get_current_time_history_and_send.log'), mode='a+', encoding='utf8')
+    log_dir_abs_path = os.path.join(file_dir_abs_path, 'log')
+    osutil.mkdir_dir(log_dir_abs_path)
+    fa = open(os.path.join(log_dir_abs_path, 'get_current_time_history_and_send.log'), mode='a+', encoding='utf8')
     logging.basicConfig(stream=fa,
                         format='%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s',
                         level=logging.DEBUG, )
@@ -159,7 +167,8 @@ def main():
         send_dingding(current_time_succeed, running, current_time_no_succeed)
     else:
         logging.debug(
-            '成功{}个，执行中{}个，非成功{}个\n\n'.format(len(current_time_succeed), len(running), len(current_time_no_succeed)))
+            '成功{}个，执行中{}个，非成功{}个\n\n'.format(len(current_time_succeed), len(running),
+                                                        len(current_time_no_succeed)))
 
     fa.close()
 

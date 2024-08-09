@@ -16,14 +16,17 @@ from pyquery import PyQuery as pq
 file_dir_abs_path = os.path.dirname(os.path.abspath(__file__))
 root_abs_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 
-
 lib_path = root_abs_path + '/utils'
 sys.path.append(lib_path)
 
 import azkabanutil
+import osutil
+
+log_dir_abs_path = os.path.join(file_dir_abs_path, 'log')
+osutil.mkdir_dir(log_dir_abs_path)
 
 logging.basicConfig(level=logging.DEBUG,
-                    filename=os.path.join(file_dir_abs_path, 'log/get_next_day_flows.log'),
+                    filename=os.path.join(log_dir_abs_path, 'get_next_day_flows.log'),
                     filemode='a+',
                     format='%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s')
 

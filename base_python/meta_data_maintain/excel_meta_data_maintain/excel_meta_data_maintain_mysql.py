@@ -6,6 +6,9 @@
 
 """
 openpyxl 库的文档见:https://openpyxl.readthedocs.io/en/stable/
+openpyxl 库的安装: pip3 install openpyxl==3.0.10
+
+因为部分项目只需要用到MySQL 所以只需要维护MySQL的元数据
 """
 
 import os
@@ -13,14 +16,11 @@ import sys
 import configparser
 import datetime
 
-# 定义root path
-root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-
 # 添加自定义模块到系统路径
-mylib_path = root_path + '/utils'
+
+mylib_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)) + '/utils'
 sys.path.append(mylib_path)
 import mysqlutil
-import gputil
 from logutil import Logging
 import openpyxl
 import excel_meta_data_util
@@ -29,20 +29,20 @@ import excel_meta_data_util
 logger = Logging().get_logger()
 
 # 加载配置文件
-config_path = root_path + '/config/prod_dev.conf'
+config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)) + '/config/prod_dev.conf'
 config = configparser.ConfigParser()
 config.read(config_path, encoding="utf-8-sig")
-hive_mysql_section = "hive_mysql"
-hive_mysql_host = config.get(hive_mysql_section, "host")
-hive_mysql_user = config.get(hive_mysql_section, "user")
-hive_mysql_passwd = config.get(hive_mysql_section, "passwd")
-hive_mysql_database = config.get(hive_mysql_section, "database")
-hive_mysql_port = config.get(hive_mysql_section, "port")
+# 整个项目以MySQL为主
+mysql_section = "front_mysql"
+mysql_host = config.get(mysql_section, "host")
+mysql_user = config.get(mysql_section, "user")
+mysql_passwd = config.get(mysql_section, "passwd")
+mysql_database = config.get(mysql_section, "database")
+mysql_port = config.get(mysql_section, "port")
 
 # 项目的信息
 project_section = "project"
 project_name = config.get(project_section, "name")
-project_hive_db = config.get(project_section, "hive_db")
 # excel目录的sheet name
 catalog_sheet_name = config.get(project_section, "catalog_sheet")
 # excel中 表信息的sheet模板的sheet name
@@ -50,12 +50,20 @@ template_sheet_name = config.get(project_section, "template_sheet")
 # excel边框样式
 border_style = config.get(project_section, "border_style")
 
-gp_section = "greenplum"
-gp_host = config.get(gp_section, "host")
-gp_user = config.get(gp_section, "user")
-gp_passwd = config.get(gp_section, "passwd")
-gp_database = config.get(gp_section, "database")
-gp_port = config.get(gp_section, "port")
+
+def get_mysql_table_name_dict():
+    """
+    获取要维护元数据的表名
+    :return:
+    """
+    result_dict = {}
+    table_list = []
+
+    # table_list.append("xxx")
+
+    for i in table_list:
+        result_dict[i] = i
+    return result_dict
 
 
 def get_gp_white_tbl_list_dict():
@@ -84,30 +92,27 @@ def get_hive_black_list_dict():
 
 if __name__ == '__main__':
     try:
-        excel_input_path = root_path + '/meta_data_maintain/input/xxxx.xlsx'
+        excel_input_path = r'../input/数据模型-模板.xlsx'
         output_file_name = "%s数据字典@%s.xlsx" % (project_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
-        output_path = root_path + "/meta_data_maintain/output/%s" % output_file_name
+        output_path = "../output/%s" % output_file_name
         abspath = os.path.abspath(excel_input_path)
         workbook = openpyxl.load_workbook(abspath)
-        hive_mysql_conn = mysqlutil.connect_with_port(logger, hive_mysql_host, hive_mysql_user, hive_mysql_passwd,
-                                                      hive_mysql_database,
-                                                      int(hive_mysql_port))
-        gp_conn = gputil.maintain_conn(logger, None, gp_host, gp_user, gp_passwd, gp_database, gp_port)
         # 先将层级的合并单元格拆分掉
         excel_meta_data_util.unmerge_catalog_cells(logger, workbook)
-        # 通过 sql 从Hive的元数据库MySQL中查询出某个db_name下的所有表以及表的column信息
-        mysql_dict = excel_meta_data_util.get_tables_from_hive_meta_data(logger, project_hive_db, hive_mysql_conn)
-        # 通过 sql 从GP中查询出某个db_name 下的所有表以及表的column信息
-        gp_dict = excel_meta_data_util.get_tables_from_gp_meta_data(logger, gp_conn)
+        mysql_conn = mysqlutil.connect_with_port(logger, mysql_host, mysql_user, mysql_passwd,
+                                                 mysql_database,
+                                                 int(mysql_port))
+        # 获取要维护元数据的表名
+        need_maintain_table_name_dict = get_mysql_table_name_dict()
+        # 通过 sql 从MySQL中查询出某个db_name下的所有表以及表的column信息
+        mysql_dict = excel_meta_data_util.get_tables_from_mysql(logger, mysql_database, mysql_conn,
+                                                                need_maintain_table_name_dict)
+        gp_dict = dict()
         # 获取excel的目录的内容
         excel_catalog_dict = excel_meta_data_util.parse_catalog_sheet(logger, workbook)
-        # GP数据库中的需要添加的元数据信息 即白名单 因为GP中只有少数表是需要维护元数据到excel中 所以用白名单来标识
-        gp_white_list = get_gp_white_tbl_list_dict()
-        # Hive中不需要添加的元数据信息 即黑名单 因Hive中只有少数表是不需要维护元数据到excel中 所以用黑名单来标识
-        hive_black_list = get_hive_black_list_dict()
-        # 获取excel中缺失的元数据信息
+        # 获取excel中缺失的元数据信息 因为只需要维护MySQL的元数据 所以后3个参数都给了个空dict
         missing_dict = excel_meta_data_util.get_missing_meta_data(logger, mysql_dict, excel_catalog_dict, gp_dict,
-                                                                  gp_white_list, hive_black_list)
+                                                                  gp_dict, gp_dict)
         # 有excel目录中缺失的元数据信息 才进行缺失元数据的写入
         if len(missing_dict) > 0:
             # 获取各个层级的最大的行
@@ -134,5 +139,4 @@ if __name__ == '__main__':
         logger.error(e)
         raise Exception
     finally:
-        mysqlutil.close(hive_mysql_conn)
-        gputil.close(gp_conn)
+        mysqlutil.close(mysql_conn)
